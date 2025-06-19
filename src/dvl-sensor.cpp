@@ -30,6 +30,7 @@ old_altitude(0.0)
     dvl_pub_config_status = this->create_publisher<dvl_msgs::msg::ConfigStatus>("dvl/config/status", qos);
     dvl_pub_command_response = this->create_publisher<dvl_msgs::msg::CommandResponse>("dvl/command/response", qos);
     dvl_sub_config_command = this->create_subscription<dvl_msgs::msg::ConfigCommand>("dvl/config/command", qos, std::bind(&DVL_A50::command_subscriber, this, _1));
+    dvl_pub_altitude = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/altitude", qos);
 
     dvl_pub_twist_cov = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/twist_cov", qos);
     // dvl_pub_twist = this->create_publisher<geometry_msgs::msg::TwistStamped>("dvl/twist", qos);
@@ -38,9 +39,11 @@ old_altitude(0.0)
     this->declare_parameter<std::string>("dvl_ip_address", "192.168.194.95");
     this->declare_parameter<std::string>("velocity_frame_id", "dvl_A50/velocity_link");
     this->declare_parameter<std::string>("position_frame_id", "dvl_A50/position_link");
-    
+    this->declare_parameter<std::string>("altitude_frame_id", "pool_bottom"); // reference for altitude 
+
     velocity_frame_id = this->get_parameter("velocity_frame_id").as_string();
     position_frame_id = this->get_parameter("position_frame_id").as_string();
+    altitude_frame_id = this->get_parameter("altitude_frame_id").as_string();
     ip_address = this->get_parameter("dvl_ip_address").as_string();
     RCLCPP_INFO(get_logger(), "IP_ADDRESS: '%s'", ip_address.c_str());
 
@@ -204,6 +207,7 @@ void DVL_A50::publish_vel_trans_report()
     dvl.velocity.covariance = twist_covariance;
     
     dvl.fom = double(json_data["fom"]);
+    
     double current_altitude = double(json_data["altitude"]);
     dvl.velocity_valid = json_data["velocity_valid"];
             
@@ -211,6 +215,28 @@ void DVL_A50::publish_vel_trans_report()
         old_altitude = dvl.altitude = current_altitude;
     else
         dvl.altitude = old_altitude;
+
+    // Publish altitude as a PoseWithCovarianceStamped message
+    geometry_msgs::msg::PoseWithCovarianceStamped altitude;
+    geometry_msgs::msg::PoseWithCovariance altitude_pose;  // Set the pose of the altitude message
+    altitude_pose.pose.position.x = 0.0;
+    altitude_pose.pose.position.y = 0.0;
+    altitude_pose.pose.position.z = dvl.altitude; // Use the current altitude
+    altitude_pose.pose.orientation.x = 0.0;
+    altitude_pose.pose.orientation.y = 0.0;
+    altitude_pose.pose.orientation.z = 0.0;
+    altitude_pose.pose.orientation.w = 1.0; // Set orientation to identity quaternion  
+    altitude_pose.covariance[0] = 1e6; // Set covariance for position x
+    altitude_pose.covariance[7] = 1e6; // Set covariance for position y
+    altitude_pose.covariance[14] = dvl.fom * dvl.fom; // Set covariance for position z
+    altitude_pose.covariance[21] = 1e6; // Set covariance for roll
+    altitude_pose.covariance[28] = 1e6; // Set covariance for pitch
+    altitude_pose.covariance[35] = 1e6; // Set covariance for yaw
+
+    altitude.header.stamp = this->now();
+    altitude.header.frame_id = altitude_frame_id; // To be specified in launch file
+    altitude.pose = altitude_pose;
+    dvl_pub_altitude->publish(altitude);
 
     dvl.status = json_data["status"];
     dvl.form = json_data["format"];

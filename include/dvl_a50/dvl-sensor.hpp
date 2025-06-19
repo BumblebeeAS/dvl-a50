@@ -64,6 +64,7 @@ private:
     std::string ip_address;
     std::string velocity_frame_id;
     std::string position_frame_id;
+    std::string altitude_frame_id;
     TCPSocket *tcpSocket;
     json json_data;
 
@@ -78,6 +79,8 @@ private:
     rclcpp::Publisher<dvl_msgs::msg::DVLDR>::SharedPtr dvl_pub_pos;
     rclcpp::Publisher<dvl_msgs::msg::CommandResponse>::SharedPtr dvl_pub_command_response;
     rclcpp::Publisher<dvl_msgs::msg::ConfigStatus>::SharedPtr dvl_pub_config_status;
+
+    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr dvl_pub_altitude;
     rclcpp::Subscription<dvl_msgs::msg::ConfigCommand>::SharedPtr dvl_sub_config_command;
 
     rclcpp::Publisher<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr dvl_pub_twist_cov;
