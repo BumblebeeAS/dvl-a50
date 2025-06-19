@@ -25,7 +25,7 @@ find_package(dvl_msgs REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
-
+find_package(tf2 REQUIRED)
 
 set(node_plugins "")
 
@@ -45,7 +45,10 @@ ament_target_dependencies(dvl_a50_component
   "lifecycle_msgs"
   "rclcpp_lifecycle"
   "std_msgs"
-  "dvl_msgs")
+  "dvl_msgs"
+  "geometry_msgs"
+  "tf2"
+)
   
 rclcpp_components_register_nodes(dvl_a50_component "composition::LifecycleDVL")
 set(node_plugins "${node_plugins}composition::LifecycleDVL;$<TARGET_FILE:dvl_a50_component>\n")
@@ -56,7 +59,8 @@ add_executable(${PROJECT_NAME}_sensor src/dvl-sensor.cpp)
 ament_target_dependencies(${PROJECT_NAME}_sensor rclcpp 
     "sensor_msgs" 
     "geometry_msgs" 
-    "dvl_msgs")
+    "dvl_msgs"
+    "tf2")
 
 
 #Install C++ targets

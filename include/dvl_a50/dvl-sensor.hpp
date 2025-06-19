@@ -26,6 +26,7 @@
 #include <geometry_msgs/msg/twist_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
+#include <tf2/LinearMath/Quaternion.hpp>
 
 #include "dvl_a50/json/single_include/nlohmann/json.hpp"
 #include <iomanip>
@@ -80,12 +81,11 @@ private:
     rclcpp::Publisher<dvl_msgs::msg::CommandResponse>::SharedPtr dvl_pub_command_response;
     rclcpp::Publisher<dvl_msgs::msg::ConfigStatus>::SharedPtr dvl_pub_config_status;
 
-    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr dvl_pub_altitude;
     rclcpp::Subscription<dvl_msgs::msg::ConfigCommand>::SharedPtr dvl_sub_config_command;
-
-    rclcpp::Publisher<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr dvl_pub_twist_cov;
-    rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr dvl_pub_twist;
-    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr dvl_pub_dr_pose_cov;
+    
+    rclcpp::Publisher<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr dvl_pub_twist_cov;  // DVL Velocity
+    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr dvl_pub_dr_pose_cov; // dead reckoning post
+    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr dvl_pub_altitude;    // altitude (distance from seafloor)
 
     void handle_receive();
     //Publish velocity and transducer report

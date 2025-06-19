@@ -29,13 +29,13 @@ old_altitude(0.0)
     dvl_pub_pos = this->create_publisher<dvl_msgs::msg::DVLDR>("dvl/position", qos);
     dvl_pub_config_status = this->create_publisher<dvl_msgs::msg::ConfigStatus>("dvl/config/status", qos);
     dvl_pub_command_response = this->create_publisher<dvl_msgs::msg::CommandResponse>("dvl/command/response", qos);
-    dvl_sub_config_command = this->create_subscription<dvl_msgs::msg::ConfigCommand>("dvl/config/command", qos, std::bind(&DVL_A50::command_subscriber, this, _1));
+    
     dvl_pub_altitude = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/altitude", qos);
-
     dvl_pub_twist_cov = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/twist_cov", qos);
-    // dvl_pub_twist = this->create_publisher<geometry_msgs::msg::TwistStamped>("dvl/twist", qos);
-    dvl_pub_dr_pose_cov = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/pose_cov", qos);
+    dvl_pub_dr_pose_cov = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/deadreckon_pose_cov", qos);
 
+    dvl_sub_config_command = this->create_subscription<dvl_msgs::msg::ConfigCommand>("dvl/config/command", qos, std::bind(&DVL_A50::command_subscriber, this, _1));
+    
     this->declare_parameter<std::string>("dvl_ip_address", "192.168.194.95");
     this->declare_parameter<std::string>("velocity_frame_id", "dvl_A50/velocity_link");
     this->declare_parameter<std::string>("position_frame_id", "dvl_A50/position_link");
@@ -168,16 +168,22 @@ void DVL_A50::publish_vel_trans_report()
     dvl.header.frame_id = velocity_frame_id;
         
     dvl.time = double(json_data["time"]);
+
+    // Populate DVL velocity field (Vector3)
+    dvl.velocity.x = double(json_data["vx"]);    
+    dvl.velocity.y = double(json_data["vy"]);
+    dvl.velocity.z = double(json_data["vz"]);
     
-    // Populate TwistWithCovariance velocity field
-    dvl.velocity.twist.linear.x = double(json_data["vx"]);
-    dvl.velocity.twist.linear.y = double(json_data["vy"]);
-    dvl.velocity.twist.linear.z = double(json_data["vz"]);
+    // Create TwistWithCovariance for separate message
+    geometry_msgs::msg::TwistWithCovariance twist_with_cov;
+    twist_with_cov.twist.linear.x = double(json_data["vx"]);
+    twist_with_cov.twist.linear.y = double(json_data["vy"]);
+    twist_with_cov.twist.linear.z = double(json_data["vz"]);
     
     // DVL doesn't measure angular velocity, set to zero
-    dvl.velocity.twist.angular.x = 0.0;
-    dvl.velocity.twist.angular.y = 0.0;
-    dvl.velocity.twist.angular.z = 0.0;
+    twist_with_cov.twist.angular.x = 0.0;
+    twist_with_cov.twist.angular.y = 0.0;
+    twist_with_cov.twist.angular.z = 0.0;
     
     // Extract and process covariance from JSON
     std::array<double, 36> twist_covariance = {0};
@@ -204,7 +210,7 @@ void DVL_A50::publish_vel_trans_report()
     twist_covariance[28] = 1e6;  // wy variance
     twist_covariance[35] = 1e6;  // wz variance
     
-    dvl.velocity.covariance = twist_covariance;
+    twist_with_cov.covariance = twist_covariance;
     
     dvl.fom = double(json_data["fom"]);
     
@@ -218,23 +224,23 @@ void DVL_A50::publish_vel_trans_report()
 
     // Publish altitude as a PoseWithCovarianceStamped message
     geometry_msgs::msg::PoseWithCovarianceStamped altitude;
-    geometry_msgs::msg::PoseWithCovariance altitude_pose;  // Set the pose of the altitude message
+    geometry_msgs::msg::PoseWithCovariance altitude_pose;
     altitude_pose.pose.position.x = 0.0;
     altitude_pose.pose.position.y = 0.0;
-    altitude_pose.pose.position.z = dvl.altitude; // Use the current altitude
+    altitude_pose.pose.position.z = dvl.altitude;
     altitude_pose.pose.orientation.x = 0.0;
     altitude_pose.pose.orientation.y = 0.0;
     altitude_pose.pose.orientation.z = 0.0;
-    altitude_pose.pose.orientation.w = 1.0; // Set orientation to identity quaternion  
-    altitude_pose.covariance[0] = 1e6; // Set covariance for position x
-    altitude_pose.covariance[7] = 1e6; // Set covariance for position y
-    altitude_pose.covariance[14] = dvl.fom * dvl.fom; // Set covariance for position z
-    altitude_pose.covariance[21] = 1e6; // Set covariance for roll
-    altitude_pose.covariance[28] = 1e6; // Set covariance for pitch
-    altitude_pose.covariance[35] = 1e6; // Set covariance for yaw
+    altitude_pose.pose.orientation.w = 1.0;
+    altitude_pose.covariance[0] = 1e6;
+    altitude_pose.covariance[7] = 1e6;
+    altitude_pose.covariance[14] = dvl.fom * dvl.fom;
+    altitude_pose.covariance[21] = 1e6;
+    altitude_pose.covariance[28] = 1e6;
+    altitude_pose.covariance[35] = 1e6;
 
     altitude.header.stamp = this->now();
-    altitude.header.frame_id = altitude_frame_id; // To be specified in launch file
+    altitude.header.frame_id = altitude_frame_id;
     altitude.pose = altitude_pose;
     dvl_pub_altitude->publish(altitude);
 
@@ -270,19 +276,15 @@ void DVL_A50::publish_vel_trans_report()
     beam3.valid = json_data["transducers"][3]["beam_valid"];
             
     dvl.beams = {beam0, beam1, beam2, beam3};
+    
+    // Publish original DVL message
     dvl_pub_report->publish(dvl);
 
-    // Publish TwistWithCovarianceStamped 
+    // Publish TwistWithCovarianceStamped message
     geometry_msgs::msg::TwistWithCovarianceStamped twist_cov_msg;
     twist_cov_msg.header = dvl.header;
-    twist_cov_msg.twist = dvl.velocity;
+    twist_cov_msg.twist = twist_with_cov;
     dvl_pub_twist_cov->publish(twist_cov_msg);
-    
-    // Publish TwistStamped (if needed) 
-    // geometry_msgs::msg::TwistStamped twist_msg;
-    // twist_msg.header = dvl.header;
-    // twist_msg.twist = dvl.velocity.twist;
-    // dvl_pub_twist->publish(twist_msg);
 }
 
 /*
@@ -339,7 +341,7 @@ void DVL_A50::publish_dead_reckoning_report()
     pose_covariance[35] = 0.01;  // yaw variance (rad^2)
     
     pose_cov_msg.pose.covariance = pose_covariance;
-    dvl_pub_pose_cov->publish(pose_cov_msg);
+    dvl_pub_dr_pose_cov->publish(pose_cov_msg);
 }
 
 /*
