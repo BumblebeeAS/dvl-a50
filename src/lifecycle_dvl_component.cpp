@@ -173,117 +173,154 @@ LifecycleDVL::on_shutdown(const rclcpp_lifecycle::State & state)
 
 void LifecycleDVL::on_timer()
 {
-
-  if(!dvl_pub_report->is_activated() || !dvl_pub_pos->is_activated())
-  {
-      //RCLCPP_INFO(get_logger(), "Lifecycle publisher is currently inactive. Messages are not published.");
-  }else {
+    if(!dvl_pub_report->is_activated() || !dvl_pub_pos->is_activated())
+    {
+        //RCLCPP_INFO(get_logger(), "Lifecycle publisher is currently inactive. Messages are not published.");
+    }else {
         std::flush(std::cout);
         char *tempBuffer = new char[1];
 
-        //tcpSocket->Receive(&tempBuffer[0]);
         std::string str; 
     
-        //std::chrono::steady_clock::time_point current_time;
-	while(tempBuffer[0] != '\n')
-	{
-	    //current_time = std::chrono::steady_clock::now();
-	    //double dt = std::chrono::duration<double>(current_time - first_time_loss).count();
+        while(tempBuffer[0] != '\n')
+        {
             tcpSocket->Receive(tempBuffer);
-            str = str + tempBuffer[0];
-            //std::cout << "dt: " << dt << std::endl;         
-	}
-	
-	//first_time_loss = current_time;
-		
-	try
-	{
+            str = str + tempBuffer[0];         
+        }
+        
+        try
+        {
             json_data = json::parse(str);
-		
+            
             if (json_data.contains("altitude")) {
-		
-		dvl.header.stamp = rclcpp_lifecycle::LifecycleNode::now();
-		dvl.header.frame_id = "dvl_A50_report_link";
-		//std::cout << std::setw(4) << json_data << std::endl;
-		
-		dvl.time = double(json_data["time"]);
-		dvl.velocity.x = double(json_data["vx"]);
-		dvl.velocity.y = double(json_data["vy"]);
-		dvl.velocity.z = double(json_data["vz"]);
-		dvl.fom = double(json_data["fom"]);
+                
+                dvl.header.stamp = rclcpp_lifecycle::LifecycleNode::now();
+                dvl.header.frame_id = "dvl_A50_report_link";
+                
+                dvl.time = double(json_data["time"]);
+                
+                // Fix: Use TwistWithCovariance structure
+                dvl.velocity.twist.linear.x = double(json_data["vx"]);
+                dvl.velocity.twist.linear.y = double(json_data["vy"]);
+                dvl.velocity.twist.linear.z = double(json_data["vz"]);
+                
+                // DVL doesn't measure angular velocity, set to zero
+                dvl.velocity.twist.angular.x = 0.0;
+                dvl.velocity.twist.angular.y = 0.0;
+                dvl.velocity.twist.angular.z = 0.0;
+                
+                // Extract and process covariance from JSON
+                std::vector<double> cov_3x3;
+                if (json_data.contains("covariance")) {
+                    auto cov_json = json_data["covariance"];
+                    // Verify we have 9 elements for 3x3 matrix
+                    if (cov_json.size() == 9) {
+                        for (const auto& element : cov_json) {
+                            cov_3x3.push_back(double(element));
+                        }
+                    } else {
+                        RCLCPP_WARN(get_logger(), "Covariance array size mismatch: expected 9, got %zu", cov_json.size());
+                        // Use default covariance
+                        cov_3x3 = {0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.01};
+                    }
+                } else {
+                    // Default covariance if not provided
+                    cov_3x3 = {0.01, 0.0, 0.0,    // vx row
+                               0.0, 0.01, 0.0,     // vy row  
+                               0.0, 0.0, 0.01};    // vz row
+                }
+                
+                // Create 6x6 covariance matrix for TwistWithCovariance
+                // Order: [vx, vy, vz, wx, wy, wz] where w = angular velocity
+                std::array<double, 36> twist_covariance = {0};
+                
+                // Fill linear velocity covariance (upper-left 3x3)
+                for (int i = 0; i < 3; i++) {
+                    for (int j = 0; j < 3; j++) {
+                        twist_covariance[i * 6 + j] = cov_3x3[i * 3 + j];
+                    }
+                }
+                
+                // Set high uncertainty for angular velocities (bottom-right 3x3)
+                twist_covariance[21] = 1e6;  // wx uncertainty
+                twist_covariance[28] = 1e6;  // wy uncertainty  
+                twist_covariance[35] = 1e6;  // wz uncertainty
+                
+                dvl.velocity.covariance = twist_covariance;
+                
+                dvl.fom = double(json_data["fom"]);
                 current_altitude = double(json_data["altitude"]);
-		dvl.velocity_valid = json_data["velocity_valid"];
-		    
-		if(current_altitude >= 0.0 && dvl.velocity_valid)
-		{
-		    dvl.altitude = current_altitude;
-		    old_altitude = current_altitude;
-		}
-		else
-		    dvl.altitude = old_altitude;
+                dvl.velocity_valid = json_data["velocity_valid"];
+                    
+                if(current_altitude >= 0.0 && dvl.velocity_valid)
+                {
+                    dvl.altitude = current_altitude;
+                    old_altitude = current_altitude;
+                }
+                else
+                    dvl.altitude = old_altitude;
 
-
-		dvl.status = json_data["status"];
-		dvl.form = json_data["format"];
-			
-		beam0.id = json_data["transducers"][0]["id"];
-		beam0.velocity = double(json_data["transducers"][0]["velocity"]);
-		beam0.distance = double(json_data["transducers"][0]["distance"]);
-		beam0.rssi = double(json_data["transducers"][0]["rssi"]);
-		beam0.nsd = double(json_data["transducers"][0]["nsd"]);
-		beam0.valid = json_data["transducers"][0]["beam_valid"];
-			
-		beam1.id = json_data["transducers"][1]["id"];
-		beam1.velocity = double(json_data["transducers"][1]["velocity"]);
-		beam1.distance = double(json_data["transducers"][1]["distance"]);
-		beam1.rssi = double(json_data["transducers"][1]["rssi"]);
-		beam1.nsd = double(json_data["transducers"][1]["nsd"]);
-		beam1.valid = json_data["transducers"][1]["beam_valid"];
-			
-		beam2.id = json_data["transducers"][2]["id"];
-		beam2.velocity = double(json_data["transducers"][2]["velocity"]);
-		beam2.distance = double(json_data["transducers"][2]["distance"]);
-		beam2.rssi = double(json_data["transducers"][2]["rssi"]);
-		beam2.nsd = double(json_data["transducers"][2]["nsd"]);
-		beam2.valid = json_data["transducers"][2]["beam_valid"];
-			
-		beam3.id = json_data["transducers"][3]["id"];
-		beam3.velocity = double(json_data["transducers"][3]["velocity"]);
-		beam3.distance = double(json_data["transducers"][3]["distance"]);
-		beam3.rssi = double(json_data["transducers"][3]["rssi"]);
-		beam3.nsd = double(json_data["transducers"][3]["nsd"]);
-		beam3.valid = json_data["transducers"][3]["beam_valid"];
-		    
-		dvl.beams = {beam0, beam1, beam2, beam3};
-		dvl_pub_report->publish(dvl);
-		
+                // Fix: Remove status field assignment (doesn't exist in DVL.msg)
+                dvl.form = json_data["format"];
+                    
+                beam0.id = json_data["transducers"][0]["id"];
+                beam0.velocity = double(json_data["transducers"][0]["velocity"]);
+                beam0.distance = double(json_data["transducers"][0]["distance"]);
+                beam0.rssi = double(json_data["transducers"][0]["rssi"]);
+                beam0.nsd = double(json_data["transducers"][0]["nsd"]);
+                beam0.valid = json_data["transducers"][0]["beam_valid"];
+                    
+                beam1.id = json_data["transducers"][1]["id"];
+                beam1.velocity = double(json_data["transducers"][1]["velocity"]);
+                beam1.distance = double(json_data["transducers"][1]["distance"]);
+                beam1.rssi = double(json_data["transducers"][1]["rssi"]);
+                beam1.nsd = double(json_data["transducers"][1]["nsd"]);
+                beam1.valid = json_data["transducers"][1]["beam_valid"];
+                    
+                beam2.id = json_data["transducers"][2]["id"];
+                beam2.velocity = double(json_data["transducers"][2]["velocity"]);
+                beam2.distance = double(json_data["transducers"][2]["distance"]);
+                beam2.rssi = double(json_data["transducers"][2]["rssi"]);
+                beam2.nsd = double(json_data["transducers"][2]["nsd"]);
+                beam2.valid = json_data["transducers"][2]["beam_valid"];
+                    
+                beam3.id = json_data["transducers"][3]["id"];
+                beam3.velocity = double(json_data["transducers"][3]["velocity"]);
+                beam3.distance = double(json_data["transducers"][3]["distance"]);
+                beam3.rssi = double(json_data["transducers"][3]["rssi"]);
+                beam3.nsd = double(json_data["transducers"][3]["nsd"]);
+                beam3.valid = json_data["transducers"][3]["beam_valid"];
+                    
+                dvl.beams = {beam0, beam1, beam2, beam3};
+                dvl_pub_report->publish(dvl);
+                
             }
             else //if (json_data.contains("pitch")) 
             {
-		//std::cout << std::setw(4) << json_data << std::endl;
-		DVLDeadReckoning.header.stamp = rclcpp_lifecycle::LifecycleNode::now();
-		DVLDeadReckoning.header.frame_id = "dvl_A50_position_link";
-		DVLDeadReckoning.time = double(json_data["ts"]);
-		DVLDeadReckoning.position.x = double(json_data["x"]);
-		DVLDeadReckoning.position.y = double(json_data["y"]);
-		DVLDeadReckoning.position.z = double(json_data["z"]);
-		DVLDeadReckoning.pos_std = double(json_data["std"]);
-		DVLDeadReckoning.roll = double(json_data["roll"]);
-		DVLDeadReckoning.pitch = double(json_data["pitch"]);
-		DVLDeadReckoning.yaw = double(json_data["yaw"]);
-		DVLDeadReckoning.type = json_data["type"];
-		DVLDeadReckoning.status = json_data["status"];
-		DVLDeadReckoning.format = json_data["format"];
-		dvl_pub_pos->publish(DVLDeadReckoning);
-	    }
-    	
-	}
-	catch(std::exception& e)
-	{
-	     UNUSED(e);
+                //std::cout << std::setw(4) << json_data << std::endl;
+                DVLDeadReckoning.header.stamp = rclcpp_lifecycle::LifecycleNode::now();
+                DVLDeadReckoning.header.frame_id = "dvl_A50_position_link";
+                DVLDeadReckoning.time = double(json_data["ts"]);
+                DVLDeadReckoning.position.x = double(json_data["x"]);
+                DVLDeadReckoning.position.y = double(json_data["y"]);
+                DVLDeadReckoning.position.z = double(json_data["z"]);
+                DVLDeadReckoning.pos_std = double(json_data["std"]);
+                DVLDeadReckoning.roll = double(json_data["roll"]);
+                DVLDeadReckoning.pitch = double(json_data["pitch"]);
+                DVLDeadReckoning.yaw = double(json_data["yaw"]);
+                DVLDeadReckoning.type = json_data["type"];
+                DVLDeadReckoning.status = json_data["status"];
+                DVLDeadReckoning.format = json_data["format"];
+                dvl_pub_pos->publish(DVLDeadReckoning);
+            }
+            
+        }
+        catch(std::exception& e)
+        {
+             UNUSED(e);
             //std::cout << "Exception: " << e.what() << std::endl;
-	} 
-	 	    
+        } 
+            
     } 
 }
 

@@ -31,6 +31,10 @@ old_altitude(0.0)
     dvl_pub_command_response = this->create_publisher<dvl_msgs::msg::CommandResponse>("dvl/command/response", qos);
     dvl_sub_config_command = this->create_subscription<dvl_msgs::msg::ConfigCommand>("dvl/config/command", qos, std::bind(&DVL_A50::command_subscriber, this, _1));
 
+    dvl_pub_twist_cov = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/twist_cov", qos);
+    // dvl_pub_twist = this->create_publisher<geometry_msgs::msg::TwistStamped>("dvl/twist", qos);
+    dvl_pub_dr_pose_cov = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/pose_cov", qos);
+
     this->declare_parameter<std::string>("dvl_ip_address", "192.168.194.95");
     this->declare_parameter<std::string>("velocity_frame_id", "dvl_A50/velocity_link");
     this->declare_parameter<std::string>("position_frame_id", "dvl_A50/position_link");
@@ -84,6 +88,10 @@ old_altitude(0.0)
     else
         RCLCPP_INFO(get_logger(), "DVL-A50 connected!");
     
+
+    // Set RangeMode to "=1" for Altitude Range of 0.3 to 3.0 meters and 10 Hz
+    this->set_json_parameter("range_mode", "=1");
+
     /*
      * Disable transducer operation to limit sensor heating out of water.
      */
@@ -155,54 +163,100 @@ void DVL_A50::publish_vel_trans_report()
 
     dvl.header.stamp = Node::now();
     dvl.header.frame_id = velocity_frame_id;
-		
+        
     dvl.time = double(json_data["time"]);
-    dvl.velocity.x = double(json_data["vx"]);
-    dvl.velocity.y = double(json_data["vy"]);
-    dvl.velocity.z = double(json_data["vz"]);
+    
+    // Populate TwistWithCovariance velocity field
+    dvl.velocity.twist.linear.x = double(json_data["vx"]);
+    dvl.velocity.twist.linear.y = double(json_data["vy"]);
+    dvl.velocity.twist.linear.z = double(json_data["vz"]);
+    
+    // DVL doesn't measure angular velocity, set to zero
+    dvl.velocity.twist.angular.x = 0.0;
+    dvl.velocity.twist.angular.y = 0.0;
+    dvl.velocity.twist.angular.z = 0.0;
+    
+    // Extract and process covariance from JSON
+    std::array<double, 36> twist_covariance = {0};
+    
+    if (json_data.contains("covariance")) {
+        auto cov_json = json_data["covariance"];
+        
+        // Extract 3x3 covariance matrix for [vx, vy, vz]
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                // Map 3x3 covariance to upper-left of 6x6 matrix
+                twist_covariance[i * 6 + j] = double(cov_json[i][j]);
+            }
+        }
+    } else {
+        // Default covariance if not provided
+        twist_covariance[0] = 0.01;   // vx variance
+        twist_covariance[7] = 0.01;   // vy variance  
+        twist_covariance[14] = 0.01;  // vz variance
+    }
+    
+    // Set high uncertainty for angular velocities (not measured by DVL)
+    twist_covariance[21] = 1e6;  // wx variance
+    twist_covariance[28] = 1e6;  // wy variance
+    twist_covariance[35] = 1e6;  // wz variance
+    
+    dvl.velocity.covariance = twist_covariance;
+    
     dvl.fom = double(json_data["fom"]);
     double current_altitude = double(json_data["altitude"]);
     dvl.velocity_valid = json_data["velocity_valid"];
-		    
+            
     if(current_altitude >= 0.0 && dvl.velocity_valid)
         old_altitude = dvl.altitude = current_altitude;
     else
         dvl.altitude = old_altitude;
 
-
     dvl.status = json_data["status"];
     dvl.form = json_data["format"];
-			
+            
     beam0.id = json_data["transducers"][0]["id"];
     beam0.velocity = double(json_data["transducers"][0]["velocity"]);
     beam0.distance = double(json_data["transducers"][0]["distance"]);
     beam0.rssi = double(json_data["transducers"][0]["rssi"]);
     beam0.nsd = double(json_data["transducers"][0]["nsd"]);
     beam0.valid = json_data["transducers"][0]["beam_valid"];
-			
+            
     beam1.id = json_data["transducers"][1]["id"];
     beam1.velocity = double(json_data["transducers"][1]["velocity"]);
     beam1.distance = double(json_data["transducers"][1]["distance"]);
     beam1.rssi = double(json_data["transducers"][1]["rssi"]);
     beam1.nsd = double(json_data["transducers"][1]["nsd"]);
     beam1.valid = json_data["transducers"][1]["beam_valid"];
-			
+            
     beam2.id = json_data["transducers"][2]["id"];
     beam2.velocity = double(json_data["transducers"][2]["velocity"]);
     beam2.distance = double(json_data["transducers"][2]["distance"]);
     beam2.rssi = double(json_data["transducers"][2]["rssi"]);
     beam2.nsd = double(json_data["transducers"][2]["nsd"]);
     beam2.valid = json_data["transducers"][2]["beam_valid"];
-			
+            
     beam3.id = json_data["transducers"][3]["id"];
     beam3.velocity = double(json_data["transducers"][3]["velocity"]);
     beam3.distance = double(json_data["transducers"][3]["distance"]);
     beam3.rssi = double(json_data["transducers"][3]["rssi"]);
     beam3.nsd = double(json_data["transducers"][3]["nsd"]);
     beam3.valid = json_data["transducers"][3]["beam_valid"];
-		    
+            
     dvl.beams = {beam0, beam1, beam2, beam3};
     dvl_pub_report->publish(dvl);
+
+    // Publish TwistWithCovarianceStamped 
+    geometry_msgs::msg::TwistWithCovarianceStamped twist_cov_msg;
+    twist_cov_msg.header = dvl.header;
+    twist_cov_msg.twist = dvl.velocity;
+    dvl_pub_twist_cov->publish(twist_cov_msg);
+    
+    // Publish TwistStamped (if needed) 
+    // geometry_msgs::msg::TwistStamped twist_msg;
+    // twist_msg.header = dvl.header;
+    // twist_msg.twist = dvl.velocity.twist;
+    // dvl_pub_twist->publish(twist_msg);
 }
 
 /*
@@ -226,6 +280,40 @@ void DVL_A50::publish_dead_reckoning_report()
     DVLDeadReckoning.status = json_data["status"];
     DVLDeadReckoning.format = json_data["format"];
     dvl_pub_pos->publish(DVLDeadReckoning);
+
+    // Publish PoseWithCovarianceStamped
+    geometry_msgs::msg::PoseWithCovarianceStamped pose_cov_msg;
+    pose_cov_msg.header = DVLDeadReckoning.header;
+    
+    // Set position
+    pose_cov_msg.pose.pose.position.x = DVLDeadReckoning.position.x;
+    pose_cov_msg.pose.pose.position.y = DVLDeadReckoning.position.y;
+    pose_cov_msg.pose.pose.position.z = DVLDeadReckoning.position.z;
+    
+    // Convert RPY to quaternion
+    tf2::Quaternion q;
+    q.setRPY(DVLDeadReckoning.roll, DVLDeadReckoning.pitch, DVLDeadReckoning.yaw);
+    pose_cov_msg.pose.pose.orientation.x = q.x();
+    pose_cov_msg.pose.pose.orientation.y = q.y();
+    pose_cov_msg.pose.pose.orientation.z = q.z();
+    pose_cov_msg.pose.pose.orientation.w = q.w();
+    
+    // Set covariance matrix (6x6 for pose: x, y, z, roll, pitch, yaw)
+    std::array<double, 36> pose_covariance = {0};
+    double pos_variance = DVLDeadReckoning.pos_std * DVLDeadReckoning.pos_std;
+    
+    // Position covariance (assuming isotropic uncertainty)
+    pose_covariance[0] = pos_variance;   // x variance
+    pose_covariance[7] = pos_variance;   // y variance
+    pose_covariance[14] = pos_variance;  // z variance
+    
+    // Orientation covariance (set reasonable defaults)
+    pose_covariance[21] = 0.01;  // roll variance (rad^2)
+    pose_covariance[28] = 0.01;  // pitch variance (rad^2)
+    pose_covariance[35] = 0.01;  // yaw variance (rad^2)
+    
+    pose_cov_msg.pose.covariance = pose_covariance;
+    dvl_pub_pose_cov->publish(pose_cov_msg);
 }
 
 /*
