@@ -23,6 +23,7 @@
 #include "dvl_msgs/msg/config_command.hpp"
 #include "dvl_msgs/msg/command_response.hpp"
 #include "dvl_msgs/msg/config_status.hpp"
+#include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 
 #include "dvl_a50/json/single_include/nlohmann/json.hpp"
 #include <iomanip>
@@ -61,6 +62,7 @@ private:
     std::string ip_address;
     std::string velocity_frame_id;
     std::string position_frame_id;
+    std::string altitude_frame_id;
     TCPSocket *tcpSocket;
     json json_data;
 
@@ -75,6 +77,8 @@ private:
     rclcpp::Publisher<dvl_msgs::msg::DVLDR>::SharedPtr dvl_pub_pos;
     rclcpp::Publisher<dvl_msgs::msg::CommandResponse>::SharedPtr dvl_pub_command_response;
     rclcpp::Publisher<dvl_msgs::msg::ConfigStatus>::SharedPtr dvl_pub_config_status;
+
+    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr dvl_pub_altitude;
     rclcpp::Subscription<dvl_msgs::msg::ConfigCommand>::SharedPtr dvl_sub_config_command;
 
 
