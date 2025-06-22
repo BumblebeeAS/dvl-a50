@@ -22,6 +22,8 @@ old_altitude(0.0)
             qos_profile.depth),
             qos_profile);
 
+    // Timer to handle receiving data from the DVL sensor
+    // Set the timer to 50ms (20 Hz) 
     timer_receive = this->create_wall_timer(std::chrono::milliseconds(50), std::bind(&DVL_A50::handle_receive, this));
 
     //Publishers
@@ -550,6 +552,12 @@ void DVL_A50::send_parameter_to_sensor(const json &message)
     tcpSocket->Send(c);
 }
 
+/**
+ * Callback for synchronized messages from Twist and Pose topics
+ * This function is called when both messages are available and within the specified time tolerance.
+ * It combines the data into a single Odometry message and publishes it.
+ * Odometry messages are fed into the MAVROS odometry topic for FCU to fuse.
+ */
 void DVL_A50::syncCallback(
     const geometry_msgs::msg::TwistWithCovarianceStamped::ConstSharedPtr& twist_msg,
     const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr& pose_msg)
