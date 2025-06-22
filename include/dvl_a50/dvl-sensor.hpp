@@ -16,6 +16,11 @@
 #include "rclcpp/rclcpp.hpp"
 #include "dvl_a50/tcpsocket.hpp"
 
+// Add message_filters includes here
+#include <message_filters/subscriber.h>
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/approximate_time.h>
+
 #include <string>
 #include "dvl_msgs/msg/dvl.hpp"
 #include "dvl_msgs/msg/dvl_beam.hpp"
@@ -26,6 +31,9 @@
 #include <geometry_msgs/msg/twist_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <rclcpp/time.hpp>
+
 #include <tf2/LinearMath/Quaternion.hpp>
 
 #include "dvl_a50/json/single_include/nlohmann/json.hpp"
@@ -33,6 +41,7 @@
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
+using std::placeholders::_2;
 using std::string;
 using nlohmann::json;
 
@@ -86,7 +95,8 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr dvl_pub_twist_cov;  // DVL Velocity
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr dvl_pub_dr_pose_cov; // dead reckoning post
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr dvl_pub_altitude;    // altitude (distance from seafloor)
-
+    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr dvl_pub_odometry;
+    
     void handle_receive();
     //Publish velocity and transducer report
     void publish_vel_trans_report();
@@ -98,6 +108,27 @@ private:
     void set_json_parameter(const std::string name, const std::string value);
     void send_parameter_to_sensor(const json &message);
 
+    // Synchronizer typedef
+    typedef message_filters::sync_policies::ApproximateTime<
+        geometry_msgs::msg::TwistWithCovarianceStamped,
+        geometry_msgs::msg::PoseWithCovarianceStamped
+    > SyncPolicy;
+
+    // Message filter subscribers
+    message_filters::Subscriber<geometry_msgs::msg::TwistWithCovarianceStamped> twist_sub_;
+    message_filters::Subscriber<geometry_msgs::msg::PoseWithCovarianceStamped> pose_sub_;
+    
+    // Synchronizer
+    std::shared_ptr<message_filters::Synchronizer<SyncPolicy>> sync_;
+    
+    // Internal publishers for synchronization
+    rclcpp::Publisher<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr internal_twist_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr internal_pose_pub_;
+    
+    // Synchronization callback
+    void syncCallback(
+        const geometry_msgs::msg::TwistWithCovarianceStamped::ConstSharedPtr& twist_msg,
+        const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr& pose_msg);
 };
 
 } // namespace

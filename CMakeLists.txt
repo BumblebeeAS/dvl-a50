@@ -26,6 +26,9 @@ find_package(rclcpp_components REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
 find_package(tf2 REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(message_filters REQUIRED)
+
 
 set(node_plugins "")
 
@@ -56,12 +59,15 @@ set(node_plugins "${node_plugins}composition::LifecycleDVL;$<TARGET_FILE:dvl_a50
 
 
 add_executable(${PROJECT_NAME}_sensor src/dvl-sensor.cpp)
-ament_target_dependencies(${PROJECT_NAME}_sensor rclcpp 
-    "sensor_msgs" 
-    "geometry_msgs" 
-    "dvl_msgs"
-    "tf2")
-
+ament_target_dependencies(${PROJECT_NAME}_sensor 
+    rclcpp 
+    sensor_msgs 
+    geometry_msgs 
+    dvl_msgs
+    nav_msgs
+    tf2
+    message_filters
+)
 
 #Install C++ targets
 install(TARGETS

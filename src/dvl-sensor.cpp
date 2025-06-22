@@ -22,7 +22,7 @@ old_altitude(0.0)
             qos_profile.depth),
             qos_profile);
 
-    timer_receive = this->create_wall_timer(std::chrono::milliseconds(50),std::bind(&DVL_A50::handle_receive, this));
+    timer_receive = this->create_wall_timer(std::chrono::milliseconds(50), std::bind(&DVL_A50::handle_receive, this));
 
     //Publishers
     dvl_pub_report = this->create_publisher<dvl_msgs::msg::DVL>("dvl/data", qos);
@@ -33,13 +33,42 @@ old_altitude(0.0)
     dvl_pub_altitude = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/altitude", qos);
     dvl_pub_twist_cov = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/twist_cov", qos);
     dvl_pub_dr_pose_cov = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/deadreckon_pose_cov", qos);
+    
+    // Internal publishers for synchronization
+    internal_twist_pub_ = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/internal/twist", qos);
+    internal_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/internal/pose", qos);
+    
+    // MAVROS odometry publisher
+    dvl_pub_odometry = this->create_publisher<nav_msgs::msg::Odometry>("/mavros/odometry/out", qos);
+    
+    // Set up message filter subscribers - convert QoS to rmw_qos_profile_t
+    rmw_qos_profile_t rmw_qos = qos.get_rmw_qos_profile();
+    twist_sub_.subscribe(this, "dvl/internal/twist", rmw_qos);
+    pose_sub_.subscribe(this, "dvl/internal/pose", rmw_qos);
+    
+    // Create synchronizer following the tutorial pattern exactly
+    uint32_t queue_size = 10;
+    sync_ = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<
+        geometry_msgs::msg::TwistWithCovarianceStamped, 
+        geometry_msgs::msg::PoseWithCovarianceStamped>>>(
+        message_filters::sync_policies::ApproximateTime<
+            geometry_msgs::msg::TwistWithCovarianceStamped, 
+            geometry_msgs::msg::PoseWithCovarianceStamped>(queue_size), 
+        twist_sub_, pose_sub_);
+    
+    // Set age penalty (in seconds) - how much time difference is acceptable
+    sync_->setAgePenalty(0.10);  // 100ms tolerance instead of 500ms
 
+    // Register callback
+    sync_->registerCallback(std::bind(&DVL_A50::syncCallback, this, _1, _2));
+    
+    // Rest of constructor...
     dvl_sub_config_command = this->create_subscription<dvl_msgs::msg::ConfigCommand>("dvl/config/command", qos, std::bind(&DVL_A50::command_subscriber, this, _1));
     
     this->declare_parameter<std::string>("dvl_ip_address", "192.168.194.95");
     this->declare_parameter<std::string>("velocity_frame_id", "dvl_A50/velocity_link");
     this->declare_parameter<std::string>("position_frame_id", "dvl_A50/position_link");
-    this->declare_parameter<std::string>("altitude_frame_id", "pool_bottom"); // reference for altitude 
+    this->declare_parameter<std::string>("altitude_frame_id", "pool_bottom");
 
     velocity_frame_id = this->get_parameter("velocity_frame_id").as_string();
     position_frame_id = this->get_parameter("position_frame_id").as_string();
@@ -280,11 +309,14 @@ void DVL_A50::publish_vel_trans_report()
     // Publish original DVL message
     dvl_pub_report->publish(dvl);
 
-    // Publish TwistWithCovarianceStamped message
+    // Publish TwistWithCovarianceStamped message (external)
     geometry_msgs::msg::TwistWithCovarianceStamped twist_cov_msg;
     twist_cov_msg.header = dvl.header;
     twist_cov_msg.twist = twist_with_cov;
     dvl_pub_twist_cov->publish(twist_cov_msg);
+    
+    // Publish to internal topic for synchronization
+    internal_twist_pub_->publish(twist_cov_msg);
 }
 
 /*
@@ -309,6 +341,10 @@ void DVL_A50::publish_dead_reckoning_report()
     DVLDeadReckoning.format = json_data["format"];
     dvl_pub_pos->publish(DVLDeadReckoning);
 
+    // Convert RPY to quaternion
+    tf2::Quaternion q;
+    q.setRPY(DVLDeadReckoning.roll, DVLDeadReckoning.pitch, DVLDeadReckoning.yaw);
+
     // Publish PoseWithCovarianceStamped
     geometry_msgs::msg::PoseWithCovarianceStamped pose_cov_msg;
     pose_cov_msg.header = DVLDeadReckoning.header;
@@ -318,9 +354,6 @@ void DVL_A50::publish_dead_reckoning_report()
     pose_cov_msg.pose.pose.position.y = DVLDeadReckoning.position.y;
     pose_cov_msg.pose.pose.position.z = DVLDeadReckoning.position.z;
     
-    // Convert RPY to quaternion
-    tf2::Quaternion q;
-    q.setRPY(DVLDeadReckoning.roll, DVLDeadReckoning.pitch, DVLDeadReckoning.yaw);
     pose_cov_msg.pose.pose.orientation.x = q.x();
     pose_cov_msg.pose.pose.orientation.y = q.y();
     pose_cov_msg.pose.pose.orientation.z = q.z();
@@ -342,6 +375,9 @@ void DVL_A50::publish_dead_reckoning_report()
     
     pose_cov_msg.pose.covariance = pose_covariance;
     dvl_pub_dr_pose_cov->publish(pose_cov_msg);
+    
+    // Publish to internal topic for synchronization
+    internal_pose_pub_->publish(pose_cov_msg);
 }
 
 /*
@@ -514,6 +550,61 @@ void DVL_A50::send_parameter_to_sensor(const json &message)
     tcpSocket->Send(c);
 }
 
+void DVL_A50::syncCallback(
+    const geometry_msgs::msg::TwistWithCovarianceStamped::ConstSharedPtr& twist_msg,
+    const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr& pose_msg)
+{
+    // Log synchronization info like in the tutorial
+    RCLCPP_INFO(get_logger(), "Sync callback with twist time %u.%u and pose time %u.%u",
+                twist_msg->header.stamp.sec, twist_msg->header.stamp.nanosec,
+                pose_msg->header.stamp.sec, pose_msg->header.stamp.nanosec);
+    
+    // Create synchronized odometry message
+    nav_msgs::msg::Odometry odom_msg;
+    
+    // Convert stamps to rclcpp::Time for proper comparison
+    rclcpp::Time twist_time(twist_msg->header.stamp);
+    rclcpp::Time pose_time(pose_msg->header.stamp);
+    
+    // Use the newer timestamp
+    if (twist_time > pose_time) {
+        odom_msg.header.stamp = twist_msg->header.stamp;
+    } else {
+        odom_msg.header.stamp = pose_msg->header.stamp;
+    }
+    
+    // Frame IDs - use consistent frame naming
+    odom_msg.header.frame_id = position_frame_id;
+    odom_msg.child_frame_id = velocity_frame_id;
+    
+    // Copy pose from dead reckoning
+    odom_msg.pose = pose_msg->pose;
+    
+    // Copy twist from velocity measurement
+    odom_msg.twist = twist_msg->twist;
+    
+    // Calculate time difference for quality assessment
+    rclcpp::Duration time_diff = twist_time - pose_time;
+    double time_diff_sec = time_diff.seconds();
+    
+    RCLCPP_DEBUG(get_logger(), "Odometry sync quality: %.3f s time difference", time_diff_sec);
+    
+    // Adjust covariance based on synchronization quality
+    if (std::abs(time_diff_sec) > 0.1) {  // More strict tolerance
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, 
+                            "Large time difference in synchronized data: %.3f s", time_diff_sec);
+        
+        // Increase uncertainty for poorly synchronized data
+        for (int i = 0; i < 6; i++) {
+            odom_msg.twist.covariance[i * 6 + i] *= 1.5;  // Increase by 50%
+        }
+    }
+    
+    // Publish synchronized odometry
+    dvl_pub_odometry->publish(odom_msg);
+    
+    RCLCPP_DEBUG(get_logger(), "Published synchronized odometry message");
+}
 }//end namespace
 
 int main(int argc, char *argv[])
