@@ -14,37 +14,40 @@ DVL_A50::DVL_A50():
 Node("dvl_a50_node"),
 old_altitude(0.0)
 {
-    rmw_qos_profile_t qos_profile = rmw_qos_profile_sensor_data;
+    rmw_qos_profile_t sensor_qos_profile = rmw_qos_profile_sensor_data;
 
-    auto qos = rclcpp::QoS(
+    auto sensor_qos = rclcpp::QoS(
             rclcpp::QoSInitialization(
-            qos_profile.history,
-            qos_profile.depth),
-            qos_profile);
+            sensor_qos_profile.history,
+            sensor_qos_profile.depth),
+            sensor_qos_profile);
+
+    rclcpp::QoS qos_profile(10);
+    qos_profile.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
 
     // Timer to handle receiving data from the DVL sensor
     // Set the timer to 50ms (20 Hz) 
     timer_receive = this->create_wall_timer(std::chrono::milliseconds(50), std::bind(&DVL_A50::handle_receive, this));
 
     //Publishers
-    dvl_pub_report = this->create_publisher<dvl_msgs::msg::DVL>("dvl/data", qos);
-    dvl_pub_pos = this->create_publisher<dvl_msgs::msg::DVLDR>("dvl/position", qos);
-    dvl_pub_config_status = this->create_publisher<dvl_msgs::msg::ConfigStatus>("dvl/config/status", qos);
-    dvl_pub_command_response = this->create_publisher<dvl_msgs::msg::CommandResponse>("dvl/command/response", qos);
+    dvl_pub_report = this->create_publisher<dvl_msgs::msg::DVL>("dvl/data", sensor_qos);
+    dvl_pub_pos = this->create_publisher<dvl_msgs::msg::DVLDR>("dvl/position", sensor_qos);
+    dvl_pub_config_status = this->create_publisher<dvl_msgs::msg::ConfigStatus>("dvl/config/status", sensor_qos);
+    dvl_pub_command_response = this->create_publisher<dvl_msgs::msg::CommandResponse>("dvl/command/response", sensor_qos);
     
-    dvl_pub_altitude = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/altitude", qos);
-    dvl_pub_twist_cov = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/twist_cov", qos);
-    dvl_pub_dr_pose_cov = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/deadreckon_pose_cov", qos);
+    dvl_pub_altitude = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/altitude", sensor_qos);
+    dvl_pub_twist_cov = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/twist_cov", sensor_qos);
+    dvl_pub_dr_pose_cov = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/deadreckon_pose_cov", sensor_qos);
     
     // Internal publishers for synchronization
-    internal_twist_pub_ = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/internal/twist", qos);
-    internal_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/internal/pose", qos);
+    internal_twist_pub_ = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/internal/twist", sensor_qos);
+    internal_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/internal/pose", sensor_qos);
     
     // MAVROS odometry publisher
-    dvl_pub_odometry = this->create_publisher<nav_msgs::msg::Odometry>("/mavros/odometry/out", qos);
+    dvl_pub_odometry = this->create_publisher<nav_msgs::msg::Odometry>("/mavros/odometry/out", qos_profile);
     
     // Set up message filter subscribers - convert QoS to rmw_qos_profile_t
-    rmw_qos_profile_t rmw_qos = qos.get_rmw_qos_profile();
+    rmw_qos_profile_t rmw_qos = sensor_qos.get_rmw_qos_profile();
     twist_sub_.subscribe(this, "dvl/internal/twist", rmw_qos);
     pose_sub_.subscribe(this, "dvl/internal/pose", rmw_qos);
     
@@ -65,7 +68,7 @@ old_altitude(0.0)
     sync_->registerCallback(std::bind(&DVL_A50::syncCallback, this, _1, _2));
     
     // Rest of constructor...
-    dvl_sub_config_command = this->create_subscription<dvl_msgs::msg::ConfigCommand>("dvl/config/command", qos, std::bind(&DVL_A50::command_subscriber, this, _1));
+    dvl_sub_config_command = this->create_subscription<dvl_msgs::msg::ConfigCommand>("dvl/config/command", sensor_qos, std::bind(&DVL_A50::command_subscriber, this, _1));
     
     this->declare_parameter<std::string>("dvl_ip_address", "192.168.194.95");
     this->declare_parameter<std::string>("velocity_frame_id", "dvl_A50/velocity_link");
