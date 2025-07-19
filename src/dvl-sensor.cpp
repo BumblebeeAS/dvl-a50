@@ -590,9 +590,11 @@ void DVL_A50::syncCallback(
     
     // Copy pose from dead reckoning
     odom_msg.pose = pose_msg->pose;
+    std::swap(odom_msg.pose.pose.position.x, odom_msg.pose.pose.position.y);
     
     // Copy twist from velocity measurement
     odom_msg.twist = twist_msg->twist;
+    std::swap(odom_msg.twist.twist.linear.x, odom_msg.twist.twist.linear.y);
     
     // Calculate time difference for quality assessment
     rclcpp::Duration time_diff = twist_time - pose_time;
