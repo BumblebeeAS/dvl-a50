@@ -96,8 +96,9 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr dvl_pub_dr_pose_cov; // dead reckoning post
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr dvl_pub_altitude;    // altitude (distance from seafloor)
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr dvl_pub_odometry;
-    
-    void handle_receive();
+    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr dvl_pub_basic_odom;
+
+        void handle_receive();
     //Publish velocity and transducer report
     void publish_vel_trans_report();
     void publish_dead_reckoning_report();
