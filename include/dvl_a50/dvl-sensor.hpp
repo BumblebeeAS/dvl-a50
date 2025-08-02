@@ -28,6 +28,7 @@
 #include "dvl_msgs/msg/config_command.hpp"
 #include "dvl_msgs/msg/command_response.hpp"
 #include "dvl_msgs/msg/config_status.hpp"
+#include "dvl_msgs/msg/dvl_odom_with_confidence.hpp"
 #include <geometry_msgs/msg/twist_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
@@ -96,7 +97,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr dvl_pub_dr_pose_cov; // dead reckoning post
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr dvl_pub_altitude;    // altitude (distance from seafloor)
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr dvl_pub_odometry;
-    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr dvl_pub_basic_odom;
+    rclcpp::Publisher<dvl_msgs::msg::DVLOdomWithConfidence>::SharedPtr dvl_pub_odom_with_confidence;
 
         void handle_receive();
     //Publish velocity and transducer report

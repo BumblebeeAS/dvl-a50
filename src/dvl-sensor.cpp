@@ -45,7 +45,7 @@
      
      // MAVROS odometry publisher
      dvl_pub_odometry = this->create_publisher<nav_msgs::msg::Odometry>("/mavros/odometry/out", qos_profile);
-     dvl_pub_basic_odom = this->create_publisher<nav_msgs::msg::Odometry>("dvl/odom", qos_profile);
+     dvl_pub_odom_with_confidence = this->create_publisher<dvl_msgs::msg::DVLOdomWithConfidence>("/dvl/confidence_odom", qos_profile);
 
      // Set up message filter subscribers - convert QoS to rmw_qos_profile_t
      rmw_qos_profile_t rmw_qos = sensor_qos.get_rmw_qos_profile();
@@ -369,9 +369,10 @@
 
      // Set velocity (linear from DVL)
      odom_msg.twist = twist_with_cov;
-
-     // Publish odometry
-     dvl_pub_basic_odom->publish(odom_msg);
+     dvl_msgs::msg::DVLOdomWithConfidence odom_with_confidence;
+     odom_with_confidence.odom = odom_msg;
+     odom_with_confidence.confidence = confidence;
+     dvl_pub_odom_with_confidence->publish(odom_with_confidence);
 }
 
 /*
