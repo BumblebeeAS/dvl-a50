@@ -5,374 +5,374 @@
  * @date   24/11/2021
  */
 
- #include "dvl_a50/dvl-sensor.hpp"
+#include "dvl_a50/dvl-sensor.hpp"
 
- namespace dvl_sensor {
+namespace dvl_sensor {
  
  
- DVL_A50::DVL_A50():
- Node("dvl_a50_node"),
- old_altitude(0.0)
- {
-     rmw_qos_profile_t sensor_qos_profile = rmw_qos_profile_sensor_data;
- 
-     auto sensor_qos = rclcpp::QoS(
-             rclcpp::QoSInitialization(
-             sensor_qos_profile.history,
-             sensor_qos_profile.depth),
-             sensor_qos_profile);
- 
-     rclcpp::QoS qos_profile(10);
-     qos_profile.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
- 
-     // Timer to handle receiving data from the DVL sensor
-     // Set the timer to 50ms (20 Hz) 
-     timer_receive = this->create_wall_timer(std::chrono::milliseconds(50), std::bind(&DVL_A50::handle_receive, this));
- 
-     //Publishers
-     dvl_pub_report = this->create_publisher<dvl_msgs::msg::DVL>("dvl/data", sensor_qos);
-     dvl_pub_pos = this->create_publisher<dvl_msgs::msg::DVLDR>("dvl/position", sensor_qos);
-     dvl_pub_config_status = this->create_publisher<dvl_msgs::msg::ConfigStatus>("dvl/config/status", sensor_qos);
-     dvl_pub_command_response = this->create_publisher<dvl_msgs::msg::CommandResponse>("dvl/command/response", sensor_qos);
-     
-     dvl_pub_altitude = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/altitude", sensor_qos);
-     dvl_pub_twist_cov = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/twist_cov", sensor_qos);
-     dvl_pub_dr_pose_cov = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/deadreckon_pose_cov", sensor_qos);
-     
-     // Internal publishers for synchronization
-     internal_twist_pub_ = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/internal/twist", sensor_qos);
-     internal_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/internal/pose", sensor_qos);
-     
-     // MAVROS odometry publisher
-     dvl_pub_odometry = this->create_publisher<nav_msgs::msg::Odometry>("/mavros/odometry/out", qos_profile);
-     dvl_pub_odom_with_confidence = this->create_publisher<dvl_msgs::msg::DVLOdomWithConfidence>("/dvl/confidence_odom", qos_profile);
+DVL_A50::DVL_A50():
+Node("dvl_a50_node"),
+old_altitude(0.0)
+{
+    rmw_qos_profile_t sensor_qos_profile = rmw_qos_profile_sensor_data;
 
-     // Set up message filter subscribers - convert QoS to rmw_qos_profile_t
-     rmw_qos_profile_t rmw_qos = sensor_qos.get_rmw_qos_profile();
-     twist_sub_.subscribe(this, "dvl/internal/twist", rmw_qos);
-     pose_sub_.subscribe(this, "dvl/internal/pose", rmw_qos);
-     
-     // Create synchronizer following the tutorial pattern exactly
-     uint32_t queue_size = 10;
-     sync_ = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<
-         geometry_msgs::msg::TwistWithCovarianceStamped, 
-         geometry_msgs::msg::PoseWithCovarianceStamped>>>(
-         message_filters::sync_policies::ApproximateTime<
-             geometry_msgs::msg::TwistWithCovarianceStamped, 
-             geometry_msgs::msg::PoseWithCovarianceStamped>(queue_size), 
-         twist_sub_, pose_sub_);
-     
-     // Set age penalty (in seconds) - how much time difference is acceptable
-     sync_->setAgePenalty(0.10);  // 100ms tolerance instead of 500ms
- 
-     // Register callback
-     sync_->registerCallback(std::bind(&DVL_A50::syncCallback, this, _1, _2));
-     
-     // Rest of constructor...
-     dvl_sub_config_command = this->create_subscription<dvl_msgs::msg::ConfigCommand>("dvl/config/command", sensor_qos, std::bind(&DVL_A50::command_subscriber, this, _1));
-     
-     this->declare_parameter<std::string>("dvl_ip_address", "192.168.194.95");
-     this->declare_parameter<std::string>("velocity_frame_id", "dvl_A50/velocity_link");
-     this->declare_parameter<std::string>("position_frame_id", "dvl_A50/position_link");
-     this->declare_parameter<std::string>("altitude_frame_id", "pool_bottom");
- 
-     velocity_frame_id = this->get_parameter("velocity_frame_id").as_string();
-     position_frame_id = this->get_parameter("position_frame_id").as_string();
-     altitude_frame_id = this->get_parameter("altitude_frame_id").as_string();
-     ip_address = this->get_parameter("dvl_ip_address").as_string();
-     RCLCPP_INFO(get_logger(), "IP_ADDRESS: '%s'", ip_address.c_str());
- 
-     //--- TCP/IP SOCKET ---- 
-     tcpSocket = new TCPSocket((char*)ip_address.c_str() , 16171);
-     
-     if(tcpSocket->Create() < 0)
-         RCLCPP_ERROR(get_logger(), "Error creating the socket");
+    auto sensor_qos = rclcpp::QoS(
+            rclcpp::QoSInitialization(
+            sensor_qos_profile.history,
+            sensor_qos_profile.depth),
+            sensor_qos_profile);
+
+    rclcpp::QoS qos_profile(10);
+    qos_profile.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
+
+    // Timer to handle receiving data from the DVL sensor
+    // Set the timer to 50ms (20 Hz) 
+    timer_receive = this->create_wall_timer(std::chrono::milliseconds(50), std::bind(&DVL_A50::handle_receive, this));
+
+    //Publishers
+    dvl_pub_report = this->create_publisher<dvl_msgs::msg::DVL>("dvl/data", sensor_qos);
+    dvl_pub_pos = this->create_publisher<dvl_msgs::msg::DVLDR>("dvl/position", sensor_qos);
+    dvl_pub_config_status = this->create_publisher<dvl_msgs::msg::ConfigStatus>("dvl/config/status", sensor_qos);
+    dvl_pub_command_response = this->create_publisher<dvl_msgs::msg::CommandResponse>("dvl/command/response", sensor_qos);
     
-     tcpSocket->SetRcvTimeout(400);
-     std::string error;
-     
-     int error_code = 0;
-     //int fault = 1; 
-     
-     first_time = std::chrono::steady_clock::now();
-     first_time_error = first_time;
-     while(fault != 0)
-     {
-         fault = tcpSocket->Connect(5000, error, error_code);
-         if(error_code == 114)
-         {
-             RCLCPP_WARN(get_logger(), "Is the sensor on? error_code: %d", error_code);
-             usleep(2000000);
-             std::chrono::steady_clock::time_point current_time_error = std::chrono::steady_clock::now();
-             double dt = std::chrono::duration<double>(current_time_error - first_time_error).count();
-             if(dt >= 78.5) //Max time to set up
-             {
-                 fault = -10;
-                 break;
-             }
-         }
-         else if(error_code == 103)
-         {
-             RCLCPP_WARN(get_logger(), "No route to host, DVL might be booting?: error_code: %d", error_code);
-             usleep(2000000);
-         }
-     }  
-     
-     if(fault == -10)
-     {
-         tcpSocket->Close();
-         RCLCPP_ERROR(get_logger(), "Turn the sensor on and try again!");
-     }
-     else
-         RCLCPP_INFO(get_logger(), "DVL-A50 connected!");
-     
- 
-     // Set RangeMode to "=1" for Altitude Range of 0.3 to 3.0 meters and 10 Hz
-     this->set_json_parameter("range_mode", "=1");
- 
-     /*
-      * Disable transducer operation to limit sensor heating out of water.
-      */
-     this->set_json_parameter("acoustic_enabled", "false");
-     usleep(2000);
- 
- }
- 
- DVL_A50::~DVL_A50() {
-     tcpSocket->Close();
-     delete tcpSocket;
- }
- 
- 
- void DVL_A50::handle_receive()
- {
-     char *tempBuffer = new char[1];
- 
-     //tcpSocket->Receive(&tempBuffer[0]);
-     std::string str; 
-     
-     if(fault == 0)
-     {
-         while(tempBuffer[0] != '\n')
-         {
-             if(tcpSocket->Receive(tempBuffer) !=0)
-                 str = str + tempBuffer[0];
-         }
-         
-         try
-         {
-             json_data = json::parse(str);
- 
-             if (json_data.contains("altitude")) {
-                 this->publish_vel_trans_report();
-             }
-             else if (json_data.contains("pitch")) {
-                 this->publish_dead_reckoning_report();
-             }
-             else if (json_data.contains("response_to"))
-             {
-                 if(json_data["response_to"] == "set_config"
-                 || json_data["response_to"] == "calibrate_gyro"
-                 || json_data["response_to"] == "reset_dead_reckoning")
-                     this->publish_command_response();
-                 else if(json_data["response_to"] == "get_config")
-                     this->publish_config_status();
-             }
-         }
-         catch(std::exception& e)
-         {
-             std::cout << "Exception: " << e.what() << std::endl;
-         }
- 
-     }
- }
- 
- /*
-  * Publish velocity and transductors report
-  */
- void DVL_A50::publish_vel_trans_report()
- {
-     // DVL message struct
-     dvl_msgs::msg::DVLBeam beam0;
-     dvl_msgs::msg::DVLBeam beam1;
-     dvl_msgs::msg::DVLBeam beam2;
-     dvl_msgs::msg::DVLBeam beam3;
-     dvl_msgs::msg::DVL dvl;
- 
-     dvl.header.stamp = Node::now();
-     dvl.header.frame_id = velocity_frame_id;
-         
-     dvl.time = double(json_data["time"]);
- 
-     // Populate DVL velocity field (Vector3)
-     dvl.velocity.x = double(json_data["vx"]);    
-     dvl.velocity.y = double(json_data["vy"]);
-     dvl.velocity.z = double(json_data["vz"]);
-     
-     // Create TwistWithCovariance for separate message
-     geometry_msgs::msg::TwistWithCovariance twist_with_cov;
-     twist_with_cov.twist.linear.x = double(json_data["vx"]);
-     twist_with_cov.twist.linear.y = double(json_data["vy"]);
-     twist_with_cov.twist.linear.z = double(json_data["vz"]);
-     
-     // DVL doesn't measure angular velocity, set to zero
-     twist_with_cov.twist.angular.x = 0.0;
-     twist_with_cov.twist.angular.y = 0.0;
-     twist_with_cov.twist.angular.z = 0.0;
-     
-     // Extract and process covariance from JSON
-     std::array<double, 36> twist_covariance = {0};
-     
-     if (json_data.contains("covariance")) {
-         auto cov_json = json_data["covariance"];
-         
-         // Extract 3x3 covariance matrix for [vx, vy, vz]
-         for (int i = 0; i < 3; i++) {
-             for (int j = 0; j < 3; j++) {
-                 // Map 3x3 covariance to upper-left of 6x6 matrix
-                 twist_covariance[i * 6 + j] = double(cov_json[i][j]);
-             }
-         }
-     } else {
-         // Default covariance if not provided
-         twist_covariance[0] = 0.01;   // vx variance
-         twist_covariance[7] = 0.01;   // vy variance  
-         twist_covariance[14] = 0.01;  // vz variance
-     }
-     
-     // Set high uncertainty for angular velocities (not measured by DVL)
-     twist_covariance[21] = 1e6;  // wx variance
-     twist_covariance[28] = 1e6;  // wy variance
-     twist_covariance[35] = 1e6;  // wz variance
-     
-     twist_with_cov.covariance = twist_covariance;
-     
-     dvl.fom = double(json_data["fom"]);
-     
-     double current_altitude = double(json_data["altitude"]);
-     dvl.velocity_valid = json_data["velocity_valid"];
-             
-     if(current_altitude >= 0.0 && dvl.velocity_valid)
-         old_altitude = dvl.altitude = current_altitude;
-     else
-         dvl.altitude = old_altitude;
- 
-     // Publish altitude as a PoseWithCovarianceStamped message
-     geometry_msgs::msg::PoseWithCovarianceStamped altitude;
-     geometry_msgs::msg::PoseWithCovariance altitude_pose;
-     altitude_pose.pose.position.x = 0.0;
-     altitude_pose.pose.position.y = 0.0;
-     altitude_pose.pose.position.z = dvl.altitude;
-     altitude_pose.pose.orientation.x = 0.0;
-     altitude_pose.pose.orientation.y = 0.0;
-     altitude_pose.pose.orientation.z = 0.0;
-     altitude_pose.pose.orientation.w = 1.0;
-     altitude_pose.covariance[0] = 1e6;
-     altitude_pose.covariance[7] = 1e6;
-     altitude_pose.covariance[14] = dvl.fom * dvl.fom;
-     altitude_pose.covariance[21] = 1e6;
-     altitude_pose.covariance[28] = 1e6;
-     altitude_pose.covariance[35] = 1e6;
- 
-     altitude.header.stamp = this->now();
-     altitude.header.frame_id = altitude_frame_id;
-     altitude.pose = altitude_pose;
-     dvl_pub_altitude->publish(altitude);
- 
-     dvl.status = json_data["status"];
-     dvl.form = json_data["format"];
-             
-     beam0.id = json_data["transducers"][0]["id"];
-     beam0.velocity = double(json_data["transducers"][0]["velocity"]);
-     beam0.distance = double(json_data["transducers"][0]["distance"]);
-     beam0.rssi = double(json_data["transducers"][0]["rssi"]);
-     beam0.nsd = double(json_data["transducers"][0]["nsd"]);
-     beam0.valid = json_data["transducers"][0]["beam_valid"];
-             
-     beam1.id = json_data["transducers"][1]["id"];
-     beam1.velocity = double(json_data["transducers"][1]["velocity"]);
-     beam1.distance = double(json_data["transducers"][1]["distance"]);
-     beam1.rssi = double(json_data["transducers"][1]["rssi"]);
-     beam1.nsd = double(json_data["transducers"][1]["nsd"]);
-     beam1.valid = json_data["transducers"][1]["beam_valid"];
-             
-     beam2.id = json_data["transducers"][2]["id"];
-     beam2.velocity = double(json_data["transducers"][2]["velocity"]);
-     beam2.distance = double(json_data["transducers"][2]["distance"]);
-     beam2.rssi = double(json_data["transducers"][2]["rssi"]);
-     beam2.nsd = double(json_data["transducers"][2]["nsd"]);
-     beam2.valid = json_data["transducers"][2]["beam_valid"];
-             
-     beam3.id = json_data["transducers"][3]["id"];
-     beam3.velocity = double(json_data["transducers"][3]["velocity"]);
-     beam3.distance = double(json_data["transducers"][3]["distance"]);
-     beam3.rssi = double(json_data["transducers"][3]["rssi"]);
-     beam3.nsd = double(json_data["transducers"][3]["nsd"]);
-     beam3.valid = json_data["transducers"][3]["beam_valid"];
-             
-     dvl.beams = {beam0, beam1, beam2, beam3};
-     
-     // Publish original DVL message
-     dvl_pub_report->publish(dvl);
- 
-     // Publish TwistWithCovarianceStamped message (external)
-     geometry_msgs::msg::TwistWithCovarianceStamped twist_cov_msg;
-     twist_cov_msg.header = dvl.header;
-     twist_cov_msg.twist = twist_with_cov;
-     dvl_pub_twist_cov->publish(twist_cov_msg);
-     
-     // Publish to internal topic for synchronization
-     internal_twist_pub_->publish(twist_cov_msg);
- 
-     // Time delta and displacement
-     double dt = double(json_data["time"]) / 1000.0;  // Convert ms to s
-     double dx = dt * dvl.velocity.x;
-     double dy = dt * dvl.velocity.y;
-     double dz = dt * dvl.velocity.z;
- 
-     // Compute confidence from FOM (similar to Python logic)
-     double fom = dvl.fom;
-     double fom_max = 0.4;
-     double confidence = 0.0;
- 
-     if (dvl.velocity_valid) {
-         confidence = 100.0 * (1.0 - std::min(fom, fom_max) / fom_max);
-     } else {
-         confidence = 0.0;
-     }
-     // Create and populate Odometry message
-     nav_msgs::msg::Odometry odom_msg;
-     odom_msg.header = dvl.header;
-     odom_msg.child_frame_id = velocity_frame_id;
+    dvl_pub_altitude = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/altitude", sensor_qos);
+    dvl_pub_twist_cov = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/twist_cov", sensor_qos);
+    dvl_pub_dr_pose_cov = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/deadreckon_pose_cov", sensor_qos);
+    
+    // Internal publishers for synchronization
+    internal_twist_pub_ = this->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("dvl/internal/twist", sensor_qos);
+    internal_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/internal/pose", sensor_qos);
+    
+    // MAVROS odometry publisher
+    dvl_pub_odometry = this->create_publisher<nav_msgs::msg::Odometry>("/mavros/odometry/out", qos_profile);
+    dvl_pub_odom_with_confidence = this->create_publisher<dvl_msgs::msg::DVLOdomWithConfidence>("/dvl/confidence_odom", qos_profile);
 
-     // Set pose (position from displacement)
-     odom_msg.pose.pose.position.x = dx;
-     odom_msg.pose.pose.position.y = dy;
-     odom_msg.pose.pose.position.z = dz;
+    // Set up message filter subscribers - convert QoS to rmw_qos_profile_t
+    rmw_qos_profile_t rmw_qos = sensor_qos.get_rmw_qos_profile();
+    twist_sub_.subscribe(this, "dvl/internal/twist", rmw_qos);
+    pose_sub_.subscribe(this, "dvl/internal/pose", rmw_qos);
+    
+    // Create synchronizer following the tutorial pattern exactly
+    uint32_t queue_size = 10;
+    sync_ = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<
+        geometry_msgs::msg::TwistWithCovarianceStamped, 
+        geometry_msgs::msg::PoseWithCovarianceStamped>>>(
+        message_filters::sync_policies::ApproximateTime<
+            geometry_msgs::msg::TwistWithCovarianceStamped, 
+            geometry_msgs::msg::PoseWithCovarianceStamped>(queue_size), 
+        twist_sub_, pose_sub_);
+    
+    // Set age penalty (in seconds) - how much time difference is acceptable
+    sync_->setAgePenalty(0.10);  // 100ms tolerance instead of 500ms
 
-     // Orientation can be identity (no rotation, as DVL doesn't measure it)
-     odom_msg.pose.pose.orientation.x = 0.0;
-     odom_msg.pose.pose.orientation.y = 0.0;
-     odom_msg.pose.pose.orientation.z = 0.0;
-     odom_msg.pose.pose.orientation.w = 1.0;
+    // Register callback
+    sync_->registerCallback(std::bind(&DVL_A50::syncCallback, this, _1, _2));
+    
+    // Rest of constructor...
+    dvl_sub_config_command = this->create_subscription<dvl_msgs::msg::ConfigCommand>("dvl/config/command", sensor_qos, std::bind(&DVL_A50::command_subscriber, this, _1));
+    
+    this->declare_parameter<std::string>("dvl_ip_address", "192.168.194.95");
+    this->declare_parameter<std::string>("velocity_frame_id", "dvl_A50/velocity_link");
+    this->declare_parameter<std::string>("position_frame_id", "dvl_A50/position_link");
+    this->declare_parameter<std::string>("altitude_frame_id", "pool_bottom");
 
-     // Set default pose covariance
-     for (int i = 0; i < 36; ++i)
-         odom_msg.pose.covariance[i] = 1.0;  // High uncertainty by default
+    velocity_frame_id = this->get_parameter("velocity_frame_id").as_string();
+    position_frame_id = this->get_parameter("position_frame_id").as_string();
+    altitude_frame_id = this->get_parameter("altitude_frame_id").as_string();
+    ip_address = this->get_parameter("dvl_ip_address").as_string();
+    RCLCPP_INFO(get_logger(), "IP_ADDRESS: '%s'", ip_address.c_str());
 
-     // Set lower covariance for position if velocity valid
-     if (dvl.velocity_valid) {
-         odom_msg.pose.covariance[0] = 0.1;   // x
-         odom_msg.pose.covariance[7] = 0.1;   // y
-         odom_msg.pose.covariance[14] = 0.1;  // z
-     }
+    //--- TCP/IP SOCKET ---- 
+    tcpSocket = new TCPSocket((char*)ip_address.c_str() , 16171);
+    
+    if(tcpSocket->Create() < 0)
+        RCLCPP_ERROR(get_logger(), "Error creating the socket");
 
-     // Set velocity (linear from DVL)
-     odom_msg.twist = twist_with_cov;
-     dvl_msgs::msg::DVLOdomWithConfidence odom_with_confidence;
-     odom_with_confidence.odom = odom_msg;
-     odom_with_confidence.confidence = confidence;
-     dvl_pub_odom_with_confidence->publish(odom_with_confidence);
+    tcpSocket->SetRcvTimeout(400);
+    std::string error;
+    
+    int error_code = 0;
+    //int fault = 1; 
+    
+    first_time = std::chrono::steady_clock::now();
+    first_time_error = first_time;
+    while(fault != 0)
+    {
+        fault = tcpSocket->Connect(5000, error, error_code);
+        if(error_code == 114)
+        {
+            RCLCPP_WARN(get_logger(), "Is the sensor on? error_code: %d", error_code);
+            usleep(2000000);
+            std::chrono::steady_clock::time_point current_time_error = std::chrono::steady_clock::now();
+            double dt = std::chrono::duration<double>(current_time_error - first_time_error).count();
+            if(dt >= 78.5) //Max time to set up
+            {
+                fault = -10;
+                break;
+            }
+        }
+        else if(error_code == 103)
+        {
+            RCLCPP_WARN(get_logger(), "No route to host, DVL might be booting?: error_code: %d", error_code);
+            usleep(2000000);
+        }
+    }  
+    
+    if(fault == -10)
+    {
+        tcpSocket->Close();
+        RCLCPP_ERROR(get_logger(), "Turn the sensor on and try again!");
+    }
+    else
+        RCLCPP_INFO(get_logger(), "DVL-A50 connected!");
+    
+
+    // Set RangeMode to "=1" for Altitude Range of 0.3 to 3.0 meters and 10 Hz
+    this->set_json_parameter("range_mode", "=1");
+
+    /*
+    * Disable transducer operation to limit sensor heating out of water.
+    */
+    this->set_json_parameter("acoustic_enabled", "false");
+    usleep(2000);
+
+}
+ 
+DVL_A50::~DVL_A50() {
+    tcpSocket->Close();
+    delete tcpSocket;
+}
+ 
+ 
+void DVL_A50::handle_receive()
+{
+    char *tempBuffer = new char[1];
+
+    //tcpSocket->Receive(&tempBuffer[0]);
+    std::string str; 
+    
+    if(fault == 0)
+    {
+        while(tempBuffer[0] != '\n')
+        {
+            if(tcpSocket->Receive(tempBuffer) !=0)
+                str = str + tempBuffer[0];
+        }
+        
+        try
+        {
+            json_data = json::parse(str);
+
+            if (json_data.contains("altitude")) {
+                this->publish_vel_trans_report();
+            }
+            else if (json_data.contains("pitch")) {
+                this->publish_dead_reckoning_report();
+            }
+            else if (json_data.contains("response_to"))
+            {
+                if(json_data["response_to"] == "set_config"
+                || json_data["response_to"] == "calibrate_gyro"
+                || json_data["response_to"] == "reset_dead_reckoning")
+                    this->publish_command_response();
+                else if(json_data["response_to"] == "get_config")
+                    this->publish_config_status();
+            }
+        }
+        catch(std::exception& e)
+        {
+            std::cout << "Exception: " << e.what() << std::endl;
+        }
+
+    }
+}
+ 
+/*
+* Publish velocity and transductors report
+*/
+void DVL_A50::publish_vel_trans_report()
+{
+    // DVL message struct
+    dvl_msgs::msg::DVLBeam beam0;
+    dvl_msgs::msg::DVLBeam beam1;
+    dvl_msgs::msg::DVLBeam beam2;
+    dvl_msgs::msg::DVLBeam beam3;
+    dvl_msgs::msg::DVL dvl;
+
+    dvl.header.stamp = Node::now();
+    dvl.header.frame_id = velocity_frame_id;
+        
+    dvl.time = double(json_data["time"]);
+
+    // Populate DVL velocity field (Vector3)
+    dvl.velocity.x = double(json_data["vx"]);    
+    dvl.velocity.y = double(json_data["vy"]);
+    dvl.velocity.z = double(json_data["vz"]);
+    
+    // Create TwistWithCovariance for separate message
+    geometry_msgs::msg::TwistWithCovariance twist_with_cov;
+    twist_with_cov.twist.linear.x = double(json_data["vx"]);
+    twist_with_cov.twist.linear.y = double(json_data["vy"]);
+    twist_with_cov.twist.linear.z = double(json_data["vz"]);
+    
+    // DVL doesn't measure angular velocity, set to zero
+    twist_with_cov.twist.angular.x = 0.0;
+    twist_with_cov.twist.angular.y = 0.0;
+    twist_with_cov.twist.angular.z = 0.0;
+    
+    // Extract and process covariance from JSON
+    std::array<double, 36> twist_covariance = {0};
+    
+    if (json_data.contains("covariance")) {
+        auto cov_json = json_data["covariance"];
+        
+        // Extract 3x3 covariance matrix for [vx, vy, vz]
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                // Map 3x3 covariance to upper-left of 6x6 matrix
+                twist_covariance[i * 6 + j] = double(cov_json[i][j]);
+            }
+        }
+    } else {
+        // Default covariance if not provided
+        twist_covariance[0] = 0.01;   // vx variance
+        twist_covariance[7] = 0.01;   // vy variance  
+        twist_covariance[14] = 0.01;  // vz variance
+    }
+    
+    // Set high uncertainty for angular velocities (not measured by DVL)
+    twist_covariance[21] = 1e6;  // wx variance
+    twist_covariance[28] = 1e6;  // wy variance
+    twist_covariance[35] = 1e6;  // wz variance
+    
+    twist_with_cov.covariance = twist_covariance;
+    
+    dvl.fom = double(json_data["fom"]);
+    
+    double current_altitude = double(json_data["altitude"]);
+    dvl.velocity_valid = json_data["velocity_valid"];
+            
+    if(current_altitude >= 0.0 && dvl.velocity_valid)
+        old_altitude = dvl.altitude = current_altitude;
+    else
+        dvl.altitude = old_altitude;
+
+    // Publish altitude as a PoseWithCovarianceStamped message
+    geometry_msgs::msg::PoseWithCovarianceStamped altitude;
+    geometry_msgs::msg::PoseWithCovariance altitude_pose;
+    altitude_pose.pose.position.x = 0.0;
+    altitude_pose.pose.position.y = 0.0;
+    altitude_pose.pose.position.z = dvl.altitude;
+    altitude_pose.pose.orientation.x = 0.0;
+    altitude_pose.pose.orientation.y = 0.0;
+    altitude_pose.pose.orientation.z = 0.0;
+    altitude_pose.pose.orientation.w = 1.0;
+    altitude_pose.covariance[0] = 1e6;
+    altitude_pose.covariance[7] = 1e6;
+    altitude_pose.covariance[14] = dvl.fom * dvl.fom;
+    altitude_pose.covariance[21] = 1e6;
+    altitude_pose.covariance[28] = 1e6;
+    altitude_pose.covariance[35] = 1e6;
+
+    altitude.header.stamp = this->now();
+    altitude.header.frame_id = altitude_frame_id;
+    altitude.pose = altitude_pose;
+    dvl_pub_altitude->publish(altitude);
+
+    dvl.status = json_data["status"];
+    dvl.form = json_data["format"];
+            
+    beam0.id = json_data["transducers"][0]["id"];
+    beam0.velocity = double(json_data["transducers"][0]["velocity"]);
+    beam0.distance = double(json_data["transducers"][0]["distance"]);
+    beam0.rssi = double(json_data["transducers"][0]["rssi"]);
+    beam0.nsd = double(json_data["transducers"][0]["nsd"]);
+    beam0.valid = json_data["transducers"][0]["beam_valid"];
+            
+    beam1.id = json_data["transducers"][1]["id"];
+    beam1.velocity = double(json_data["transducers"][1]["velocity"]);
+    beam1.distance = double(json_data["transducers"][1]["distance"]);
+    beam1.rssi = double(json_data["transducers"][1]["rssi"]);
+    beam1.nsd = double(json_data["transducers"][1]["nsd"]);
+    beam1.valid = json_data["transducers"][1]["beam_valid"];
+            
+    beam2.id = json_data["transducers"][2]["id"];
+    beam2.velocity = double(json_data["transducers"][2]["velocity"]);
+    beam2.distance = double(json_data["transducers"][2]["distance"]);
+    beam2.rssi = double(json_data["transducers"][2]["rssi"]);
+    beam2.nsd = double(json_data["transducers"][2]["nsd"]);
+    beam2.valid = json_data["transducers"][2]["beam_valid"];
+            
+    beam3.id = json_data["transducers"][3]["id"];
+    beam3.velocity = double(json_data["transducers"][3]["velocity"]);
+    beam3.distance = double(json_data["transducers"][3]["distance"]);
+    beam3.rssi = double(json_data["transducers"][3]["rssi"]);
+    beam3.nsd = double(json_data["transducers"][3]["nsd"]);
+    beam3.valid = json_data["transducers"][3]["beam_valid"];
+            
+    dvl.beams = {beam0, beam1, beam2, beam3};
+    
+    // Publish original DVL message
+    dvl_pub_report->publish(dvl);
+
+    // Publish TwistWithCovarianceStamped message (external)
+    geometry_msgs::msg::TwistWithCovarianceStamped twist_cov_msg;
+    twist_cov_msg.header = dvl.header;
+    twist_cov_msg.twist = twist_with_cov;
+    dvl_pub_twist_cov->publish(twist_cov_msg);
+    
+    // Publish to internal topic for synchronization
+    internal_twist_pub_->publish(twist_cov_msg);
+
+    // Time delta and displacement
+    double dt = double(json_data["time"]) / 1000.0;  // Convert ms to s
+    double dx = dt * dvl.velocity.x;
+    double dy = dt * dvl.velocity.y;
+    double dz = dt * dvl.velocity.z;
+
+    // Compute confidence from FOM (similar to Python logic)
+    double fom = dvl.fom;
+    double fom_max = 0.4;
+    double confidence = 0.0;
+
+    if (dvl.velocity_valid) {
+        confidence = 100.0 * (1.0 - std::min(fom, fom_max) / fom_max);
+    } else {
+        confidence = 0.0;
+    }
+    // Create and populate Odometry message
+    nav_msgs::msg::Odometry odom_msg;
+    odom_msg.header = dvl.header;
+    odom_msg.child_frame_id = velocity_frame_id;
+
+    // Set pose (position from displacement)
+    odom_msg.pose.pose.position.x = dx;
+    odom_msg.pose.pose.position.y = dy;
+    odom_msg.pose.pose.position.z = dz;
+
+    // Orientation can be identity (no rotation, as DVL doesn't measure it)
+    odom_msg.pose.pose.orientation.x = 0.0;
+    odom_msg.pose.pose.orientation.y = 0.0;
+    odom_msg.pose.pose.orientation.z = 0.0;
+    odom_msg.pose.pose.orientation.w = 1.0;
+
+    // Set default pose covariance
+    for (int i = 0; i < 36; ++i)
+        odom_msg.pose.covariance[i] = 1.0;  // High uncertainty by default
+
+    // Set lower covariance for position if velocity valid
+    if (dvl.velocity_valid) {
+        odom_msg.pose.covariance[0] = 0.1;   // x
+        odom_msg.pose.covariance[7] = 0.1;   // y
+        odom_msg.pose.covariance[14] = 0.1;  // z
+    }
+
+    // Set velocity (linear from DVL)
+    odom_msg.twist = twist_with_cov;
+    dvl_msgs::msg::DVLOdomWithConfidence odom_with_confidence;
+    odom_with_confidence.odom = odom_msg;
+    odom_with_confidence.confidence = confidence;
+    dvl_pub_odom_with_confidence->publish(odom_with_confidence);
 }
 
 /*
