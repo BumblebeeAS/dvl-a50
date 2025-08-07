@@ -44,7 +44,7 @@ old_altitude(0.0)
     internal_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("dvl/internal/pose", sensor_qos);
     
     // MAVROS odometry publisher
-    dvl_pub_odometry = this->create_publisher<nav_msgs::msg::Odometry>("/mavros/odometry/out", qos_profile);
+    dvl_pub_odometry = this->create_publisher<nav_msgs::msg::Odometry>("/test/dvl/sync", qos_profile);
     dvl_pub_odom_with_confidence = this->create_publisher<dvl_msgs::msg::DVLOdomWithConfidence>("/dvl/confidence_odom", qos_profile);
 
     // Set up message filter subscribers - convert QoS to rmw_qos_profile_t
